@@ -22,7 +22,7 @@ Simple, fun, and challenging — just like the original!
 > ⚠️ Requires **Python 3.10** or higher
 
 ### ✅ Windows Users
-- Download the `Deploy.zip` file from the repository.
+- Download the `Deploy.zip` file from the repository releases.
 - Unzip it and run the `.exe` file — no installation needed!
 
 ### 🐧 Linux / 🍎 macOS Users
