@@ -1,3 +1,6 @@
 from .analyzer import PerformanceAnalyzer
+from .hints import HintGenerator, HintPriority
+from .hint_manager import HintManager
 
-__all__ = ['PerformanceAnalyzer']
+
+__all__ = ['PerformanceAnalyzer', 'HintGenerator', 'HintPriority', 'HintManager']
