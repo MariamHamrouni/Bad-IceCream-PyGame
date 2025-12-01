@@ -1,12 +1,11 @@
 # demo_coach_hints.py
 """
-Script de démonstration pour le système de conseils du coach IA
+Démonstration du système de conseils Coach IA
 """
 import time
 import sys
 import os
 
-# Ajouter le dossier ai au path Python
 sys.path.append(os.path.join(os.path.dirname(__file__), 'ai'))
 
 from coach.analyzer import PerformanceAnalyzer
@@ -14,8 +13,8 @@ from coach.hint_manager import HintManager
 from utils.game_api import GameState
 
 def simulate_game_scenarios():
-    """Simule différents scénarios de jeu pour tester les conseils"""
-    scenarios = [
+    """Simule différents scénarios de jeu"""
+    return [
         {
             "name": "🎯 Débutant qui meurt souvent",
             "metrics": {
@@ -31,7 +30,7 @@ def simulate_game_scenarios():
             "game_state": GameState(
                 player_pos=(400, 300),
                 player_alive=True,
-                trolls_pos=[(380, 290), (420, 310)],
+                trolls_pos=[(380, 290)],
                 iceblocks_pos=[],
                 fruits_pos=[(350, 250)],
                 fruits_collected=[],
@@ -81,9 +80,9 @@ def simulate_game_scenarios():
             "game_state": GameState(
                 player_pos=(400, 300),
                 player_alive=True,
-                trolls_pos=[(200, 200)],
+                trolls_pos=[(500, 400)],
                 iceblocks_pos=[(350, 300)],
-                fruits_pos=[(450, 350)],  # Un seul fruit restant
+                fruits_pos=[(450, 350)],  # Un fruit restant
                 fruits_collected=[(100, 100), (200, 200), (300, 300), (400, 400)],
                 level=1,
                 round=1,
@@ -106,7 +105,7 @@ def simulate_game_scenarios():
             "game_state": GameState(
                 player_pos=(400, 300),
                 player_alive=True,
-                trolls_pos=[(300, 300)],
+                trolls_pos=[(600, 300)],
                 iceblocks_pos=[(350, 300)],
                 fruits_pos=[(500, 400)],
                 fruits_collected=[],
@@ -117,26 +116,24 @@ def simulate_game_scenarios():
             )
         }
     ]
-    
-    return scenarios
 
 def demo_coach_hints():
-    """Démonstration du système de conseils du coach IA"""
+    """Exécute la démonstration - CORRIGÉ"""
     print("🎓 Démonstration du Système de Conseils - Coach IA")
     print("=" * 60)
     
-    # Initialisation
-    analyzer = PerformanceAnalyzer()
-    hint_manager = HintManager()
-    
     scenarios = simulate_game_scenarios()
+    total_hints_all_scenarios = 0
     
     for i, scenario in enumerate(scenarios, 1):
         print(f"\n{'#'*50}")
         print(f"Scénario {i}: {scenario['name']}")
         print(f"{'#'*50}")
         
-        # Analyser les métriques (simulées pour la démo)
+        # NOUVEAU HintManager pour chaque scénario
+        analyzer = PerformanceAnalyzer()
+        hint_manager = HintManager()
+        
         metrics = scenario['metrics']
         game_state = scenario['game_state']
         
@@ -148,47 +145,40 @@ def demo_coach_hints():
         print(f"  • Blocs utilisés: {metrics['ice_block_usage']}")
         print(f"  • Ordre des fruits: {metrics['fruit_order']}")
         
-        # Générer les conseils
         print(f"\n💡 Conseils générés:")
         hints = hint_manager.update(metrics, game_state)
         
         if hints:
             for j, hint in enumerate(hints, 1):
-                priority_icon = {
+                icons = {
                     "LOW": "💡",
                     "MEDIUM": "📝", 
                     "HIGH": "⚠️",
                     "CRITICAL": "🚨"
-                }.get(hint.priority.name, "💬")
+                }
+                icon = icons.get(hint.priority.name, "💬")
                 
-                print(f"  {j}. {priority_icon} [{hint.priority.name}] {hint.message}")
+                print(f"  {j}. {icon} [{hint.priority.name}] {hint.message}")
                 print(f"     📁 Catégorie: {hint.category} | ⏱️ Durée: {hint.duration}s")
         else:
-            print("  🔇 Aucun conseil pour le moment (cooldown ou pas pertinent)")
+            print("  🔇 Aucun conseil (cooldown ou pas pertinent)")
         
-        # Statistiques du gestionnaire
         stats = hint_manager.get_stats()
+        total_hints_all_scenarios += stats['total_hints_generated']
         print(f"\n📈 Stats du coach: {stats['total_hints_generated']} conseils générés au total")
         
-        # Pause entre les scénarios
         if i < len(scenarios):
             input("\n⏎ Appuyez sur Entrée pour le scénario suivant...")
-        else:
-            print("\n" + "="*60)
-            print("🎉 DÉMONSTRATION TERMINÉE!")
-            print("="*60)
     
-    # Résumé final
-    final_stats = hint_manager.get_stats()
+    print(f"\n{'='*60}")
+    print("🎉 DÉMONSTRATION TERMINÉE!")
+    print(f"{'='*60}")
+    
     print(f"\n📊 RÉSUMÉ FINAL:")
-    print(f"  • Total conseils générés: {final_stats['total_hints_generated']}")
-    print(f"  • Conseils actuellement affichés: {final_stats['currently_displayed']}")
-    print(f"  • Système activé: {'✅ OUI' if final_stats['enabled'] else '❌ NON'}")
-    
-    if final_stats['recent_hints']:
-        print(f"  • 3 derniers conseils:")
-        for hint_info in final_stats['recent_hints'][-3:]:
-            print(f"    - {hint_info['message']}")
+    print(f"  • Total conseils générés: {total_hints_all_scenarios}")
+    print(f"  • Conseils actuellement affichés: 0 (reset entre scénarios)")
+    print(f"  • Système activé: ✅ OUI")
+    print(f"  • 3 derniers conseils: (voir chaque scénario)")
 
 if __name__ == "__main__":
     demo_coach_hints()
