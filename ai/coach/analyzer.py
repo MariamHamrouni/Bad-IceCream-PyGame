@@ -1,4 +1,3 @@
-# ai/coach/analyzer.py
 from __future__ import annotations
 from dataclasses import dataclass, asdict, field
 from typing import List, Dict, Any
@@ -19,7 +18,7 @@ class Metrics:
     ticks_played: int = 0
     time_between_deaths: List[int] = field(default_factory=list)
 
-    # dernier tick où une mort a été détectée (pour calculer time_between_deaths)
+    # interne : dernier tick d'une mort détectée
     last_death_tick: int | None = None
 
 
@@ -34,23 +33,19 @@ class GameAnalyzer:
 
     def update(self, state: GameState) -> None:
         """
-        Appel à chaque tick avec le nouvel état du jeu.
+        Appeler à chaque tick avec le nouvel état du jeu.
         """
         self.metrics.ticks_played += 1
 
-        # Si on a un état précédent, on regarde ce qui a changé
         if self._previous_state is not None:
             self._detect_death(self._previous_state, state)
             self._detect_fruits_collected(self._previous_state, state)
 
         self._previous_state = state
 
-    # ---------- détection des évènements ---------- #
+    # ---------- détection des événements ---------- #
 
     def _detect_death(self, prev: GameState, current: GameState) -> None:
-        """
-        Mort détectée si le nombre de vies du joueur diminue.
-        """
         prev_lives = getattr(prev.player, "lives", None)
         curr_lives = getattr(current.player, "lives", None)
 
@@ -68,35 +63,23 @@ class GameAnalyzer:
             self.metrics.last_death_tick = current.tick
 
     def _detect_fruits_collected(self, prev: GameState, current: GameState) -> None:
-        """
-        Fruit collecté si la liste des fruits diminue.
-        On ajoute les fruits disparus dans fruit_order.
-        """
         prev_set = set(prev.fruits)
         curr_set = set(current.fruits)
 
         collected = prev_set - curr_set
         if collected:
             self.metrics.fruit_collected += len(collected)
-            # garder l'ordre dans lequel on les voit disparaître
             for fruit in collected:
                 self.metrics.fruit_order.append(fruit)
 
     # ---------- export ---------- #
 
     def to_dict(self) -> Dict[str, Any]:
-        """
-        Retourne un dict JSON-serializable des métriques (sans last_death_tick).
-        """
         data = asdict(self.metrics)
-        # on supprime last_death_tick qui est interne
         data.pop("last_death_tick", None)
         return data
 
     def save_to_json(self, output_dir: str | Path, filename: str) -> Path:
-        """
-        Sauvegarde les métriques dans data/logs/metrics_<filename>.json
-        """
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         path = output_dir / f"metrics_{filename}.json"
