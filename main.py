@@ -1,6 +1,8 @@
 import pygame
 import random
 import sys
+from ai.enemies.interface import EnemyAIController
+from ai.utils.game_api import Grid
 
 pygame.init()
 pygame.mixer.init()
@@ -9,6 +11,11 @@ pygame.mixer.init()
 SCREEN_WIDTH, SCREEN_HEIGHT = 820, 622
 WALL_SIZE = 50
 ICE_WIDTH, ICE_HEIGHT = 40, 58
+
+# Grille IA (en tuiles)
+GRID_COLS = (SCREEN_WIDTH - 2 * WALL_SIZE) // ICE_WIDTH   # 18 colonnes
+GRID_ROWS = (SCREEN_HEIGHT - 2 * WALL_SIZE) // ICE_HEIGHT  # 9 lignes
+
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
 pygame.display.set_caption("Bad Ice Cream by Isaac Santos")
 clock = pygame.time.Clock()
@@ -81,6 +88,9 @@ class Troll(pygame.sprite.Sprite):
         self.speed = 1
         self.speed_end = 0
         self.c = 0
+         # Rôle IA (tu pourras en changer plus tard : "patroller", "blocker", etc.)
+        self.role = "chaser"
+        self.last_pos = self.rect.bottomleft
 
     def animation_andando(self):
         if self.fre:
@@ -612,7 +622,62 @@ iceblocks = pygame.sprite.Group()
 trolls = pygame.sprite.Group()
 fruits = pygame.sprite.Group()
 players = pygame.sprite.Group()
-all_sprites = pygame.sprite.Group(players,trolls) 
+all_sprites = pygame.sprite.Group(players,trolls)
+
+# ============================
+#  IA ENNEMIS (Bad Ice Cream)
+# ============================
+
+enemy_ai = EnemyAIController()
+
+
+def build_grid_from_level() -> Grid:
+    """
+    Construit la grille 2D pour l'IA à partir des IceBlocks.
+    0 = libre, 1 = mur.
+    """
+    grid: Grid = [[0 for _ in range(GRID_COLS)] for _ in range(GRID_ROWS)]
+
+    # Marque les blocs de glace comme obstacles
+    for ice in iceblocks:
+        tx = (ice.rect.x - WALL_SIZE) // ICE_WIDTH
+        ty = (ice.rect.y - WALL_SIZE) // ICE_HEIGHT
+        if 0 <= tx < GRID_COLS and 0 <= ty < GRID_ROWS:
+            grid[ty][tx] = 1
+
+    # On pourrait aussi marquer l'iglu comme obstacle plus tard
+    return grid
+
+
+def apply_ai_move_to_troll(troll: Troll, move: str) -> None:
+    """
+    Traduit le Move de l'IA ("up","down","left","right","stay")
+    en flags dir/esq/fre/tra + counter, pour réutiliser le système
+    d'animation/déplacement déjà existant.
+    """
+    if getattr(troll, "morrendo", False) or getattr(troll, "winning", False):
+        return
+
+    # On ne change de direction que lorsque le troll a terminé son mouvement
+    if troll.counter > 0:
+        return
+
+    troll.dir = troll.esq = troll.fre = troll.tra = 0
+
+    if move == "right":
+        troll.dir = 1
+        troll.counter = 58
+    elif move == "left":
+        troll.esq = 1
+        troll.counter = 58
+    elif move == "down":
+        troll.fre = 1
+        troll.counter = 40
+    elif move == "up":
+        troll.tra = 1
+        troll.counter = 40
+    # "stay" -> on ne fait rien, il garde sa direction actuelle
+ 
 
 # Niveis e rounds
 lv1_round1 = [
@@ -1189,7 +1254,6 @@ while True:
                 elif back_menu_button_rect.collidepoint(event.pos) :
                     restart()
                     active_screen = "start"
-
             elif active_screen == "start":
                 if play_button_rect.collidepoint(event.pos):
                     active_screen = "levels"
@@ -1223,15 +1287,68 @@ while True:
                     active_screen = "start"
 
     # Gaming State
+        # Gaming State
     if active_screen == "gaming":
 
         # Draw background
         screen.blit(background_surface, background_rect)
         screen.blit(iglu_inv_surf, iglu_inv_rect)
 
+        # ======================
+        #   IA ENNEMIS (TROLLS)
+        # ======================
+        if players:
+            player_sprite = players.sprites()[0]
+
+            # 1) Grille pour l'IA
+            grid = build_grid_from_level()
+
+            # 2) Joueur en coordonnées tuiles
+            px = (player_sprite.rect.x - WALL_SIZE) // ICE_WIDTH
+            py = (player_sprite.rect.y - WALL_SIZE) // ICE_HEIGHT
+            player_pos = (px, py)
+            player_lives = 3  # tu pourras utiliser un vrai compteur plus tard
+
+            # 3) Trolls -> ennemis bruts pour l'IA
+            enemies_raw = []
+            for idx, troll in enumerate(trolls.sprites()):
+                ex = (troll.rect.x - WALL_SIZE) // ICE_WIDTH
+                ey = (troll.rect.y - WALL_SIZE) // ICE_HEIGHT
+                enemies_raw.append(
+                    {
+                        "id": f"t{idx}",
+                        "x": ex,
+                        "y": ey,
+                        "role": getattr(troll, "role", "chaser"),
+                    }
+                )
+
+            # 4) Fruits en tuiles
+            fruits_tiles = []
+            for fruit in fruits.sprites():
+                fx = (fruit.rect.x - WALL_SIZE) // ICE_WIDTH
+                fy = (fruit.rect.y - WALL_SIZE) // ICE_HEIGHT
+                fruits_tiles.append((fx, fy))
+
+            # 5) Appel IA -> dict id -> move
+            moves = enemy_ai.decide_moves_from_raw(
+                grid=grid,
+                player_pos=player_pos,
+                player_lives=player_lives,
+                enemies_raw=enemies_raw,
+                fruits=fruits_tiles,
+            )
+
+            # 6) Application des mouvements sur chaque troll
+            for idx, troll in enumerate(trolls.sprites()):
+                eid = f"t{idx}"
+                move = moves.get(eid, "stay")
+                apply_ai_move_to_troll(troll, move)
+
         # Update sprites
         fruits.update()
         all_sprites.update()
+
 
         # Grid-moving system for player and trolls
         for player in all_sprites:
