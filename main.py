@@ -3,6 +3,12 @@ import random
 import sys
 from types import SimpleNamespace 
 from ai.enemies.interface import EnemyAIController
+from ai.enemies.coordinator import (
+    EnemyCoordinator,
+    EnemyCoordinatorConfig,
+    EnemyRuntimeState,
+)
+
 from ai.utils.game_api import Grid, GameState, PlayerState, EnemyState
 from ai.coach.integration import CoachIntegration
 from ai.levels.procedural_gen import gen_random_level
@@ -37,10 +43,15 @@ active_screen = "start"
 background_surface = pygame.image.load("Resources/background.png").convert_alpha()
 background_rect = background_surface.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2))
 
-# Iglu (Invisible Obstacle)
-iglu_inv_surf = pygame.Surface((160, 173), pygame.SRCALPHA)
-iglu_inv_surf.fill((0, 0, 0, 0)) 
+# Iglu (Invisible Obstacle) – hitbox réduite pour laisser passer le joueur
+IGLOO_WIDTH = 60
+IGLOO_HEIGHT = 60
+
+iglu_inv_surf = pygame.Surface((IGLOO_WIDTH, IGLOO_HEIGHT), pygame.SRCALPHA)
+iglu_inv_surf.fill((0, 0, 0, 0))
+
 iglu_inv_rect = iglu_inv_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2))
+
 
 # Classes
 class Fruits(pygame.sprite.Sprite):
@@ -652,7 +663,15 @@ sprites = SimpleNamespace(
 
 coach = CoachIntegration()
 
-enemy_ai = EnemyAIController()
+# Config par défaut : pas de routes de patrouille ni de points de blocage
+enemy_config = EnemyCoordinatorConfig(
+    patrol_routes={},   # on pourra remplir plus tard
+    block_targets={},   # idem
+)
+enemy_runtime = EnemyRuntimeState()
+enemy_coordinator = EnemyCoordinator(config=enemy_config, runtime_state=enemy_runtime)
+
+enemy_ai = EnemyAIController(coordinator=enemy_coordinator)
 
 
 def build_grid_from_level() -> Grid:
@@ -1376,6 +1395,9 @@ while True:
    
     if active_screen == "gaming":
         game_tick += 1
+        # on efface l'ancien frame en redessinant le fond du niveau
+        screen.blit(background_surface, background_rect)
+
        
         
         if not procedural_level_built:
@@ -1573,7 +1595,7 @@ while True:
             font = pygame.font.SysFont("Arial", 18)
             text_surface = font.render(hint_text, True, (255, 255, 0))  # texte jaune
             bg_rect = text_surface.get_rect()
-            bg_rect.topleft = (60, 80)  # position de l'overlay
+            bg_rect.topleft = (60, 80)  # position de l'overl     ay
             pygame.draw.rect(screen, (0, 0, 0), bg_rect.inflate(10, 6))  # fond noir
             screen.blit(text_surface, bg_rect.topleft)
 
