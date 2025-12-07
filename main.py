@@ -1,8 +1,12 @@
 import pygame
 import random
 import sys
+from types import SimpleNamespace 
 from ai.enemies.interface import EnemyAIController
 from ai.utils.game_api import Grid
+from ai.levels.procedural_gen import gen_random_level
+from ai.levels.level_builder import build_level_pygame
+
 
 pygame.init()
 pygame.mixer.init()
@@ -624,6 +628,16 @@ fruits = pygame.sprite.Group()
 players = pygame.sprite.Group()
 all_sprites = pygame.sprite.Group(players,trolls)
 
+# Petit "container" pour passer les groupes à level_builder
+sprites = SimpleNamespace(
+    iceblocks=iceblocks,
+    trolls=trolls,
+    fruits=fruits,
+    players=players,
+    all_sprites=all_sprites,
+)
+
+
 # ============================
 #  IA ENNEMIS (Bad Ice Cream)
 # ============================
@@ -1103,11 +1117,13 @@ round_atual = 1
 lv_atual = 1
 
 counter = 0
+# Pour ne pas régénérer le niveau procédural à chaque frame
+procedural_level_built = False
 
 # Restart do Nível
 def restart():
     global round_atual, players, trolls, iceblocks, all_sprites, fruits
-
+    procedural_level_built = False
     round = get_round(lv_atual,1)
 
     round_atual = 1
@@ -1289,10 +1305,17 @@ while True:
     # Gaming State
         # Gaming State
     if active_screen == "gaming":
-
-        # Draw background
-        screen.blit(background_surface, background_rect)
-        screen.blit(iglu_inv_surf, iglu_inv_rect)
+        # Générer le niveau procédural UNE SEULE FOIS
+        if not procedural_level_built:
+            spec = gen_random_level()
+            build_level_pygame(
+                spec,
+                sprites,
+                IceBlocks,  # ta classe définie plus haut
+                Fruits,
+                Troll,
+            )
+            procedural_level_built = True
 
         # ======================
         #   IA ENNEMIS (TROLLS)
