@@ -3,9 +3,11 @@ import random
 import sys
 from types import SimpleNamespace 
 from ai.enemies.interface import EnemyAIController
-from ai.utils.game_api import Grid
+from ai.utils.game_api import Grid, GameState, PlayerState, EnemyState
+from ai.coach.integration import CoachIntegration
 from ai.levels.procedural_gen import gen_random_level
 from ai.levels.level_builder import build_level_pygame
+
 
 
 pygame.init()
@@ -13,6 +15,8 @@ pygame.mixer.init()
 
 # Screen setup
 SCREEN_WIDTH, SCREEN_HEIGHT = 820, 622
+# Tick logique pour l'IA (coach)
+game_tick = 0
 WALL_SIZE = 50
 ICE_WIDTH, ICE_HEIGHT = 40, 58
 
@@ -642,6 +646,12 @@ sprites = SimpleNamespace(
 #  IA ENNEMIS (Bad Ice Cream)
 # ============================
 
+# ============================
+#  COACH (Personne B)
+# ============================
+
+coach = CoachIntegration()
+
 enemy_ai = EnemyAIController()
 
 
@@ -661,6 +671,57 @@ def build_grid_from_level() -> Grid:
 
     # On pourrait aussi marquer l'iglu comme obstacle plus tard
     return grid
+def build_game_state_from_pygame() -> GameState:
+    """
+    Construit un GameState pour le coach à partir des sprites actuels.
+    """
+    grid = build_grid_from_level()
+
+    # Joueur
+    if players:
+        p = players.sprites()[0]
+        px = (p.rect.x - WALL_SIZE) // ICE_WIDTH
+        py = (p.rect.y - WALL_SIZE) // ICE_HEIGHT
+
+        # Approximation des vies : 0 si mort, sinon 3
+        if getattr(p, "morto", False) or getattr(p, "morrendo", False):
+            lives = 0
+        else:
+            lives = 3
+
+        player_state = PlayerState(x=px, y=py, lives=lives)
+    else:
+        player_state = PlayerState(x=0, y=0, lives=3)
+
+    # Ennemis
+    enemy_states = []
+    for idx, troll in enumerate(trolls.sprites()):
+        ex = (troll.rect.x - WALL_SIZE) // ICE_WIDTH
+        ey = (troll.rect.y - WALL_SIZE) // ICE_HEIGHT
+        role = getattr(troll, "role", "chaser")
+        enemy_states.append(
+            EnemyState(
+                id=f"t{idx}",
+                x=ex,
+                y=ey,
+                role=role,
+            )
+        )
+
+    # Fruits
+    fruits_tiles = []
+    for fruit in fruits.sprites():
+        fx = (fruit.rect.x - WALL_SIZE) // ICE_WIDTH
+        fy = (fruit.rect.y - WALL_SIZE) // ICE_HEIGHT
+        fruits_tiles.append((fx, fy))
+
+    return GameState(
+        tick=game_tick,
+        grid=grid,
+        player=player_state,
+        enemies=enemy_states,
+        fruits=fruits_tiles,
+    )
 
 
 def apply_ai_move_to_troll(troll: Troll, move: str) -> None:
@@ -1123,7 +1184,10 @@ procedural_level_built = False
 # Restart do Nível
 def restart():
     global round_atual, players, trolls, iceblocks, all_sprites, fruits
+    global procedural_level_built, game_tick, coach
     procedural_level_built = False
+    game_tick = 0
+    coach = CoachIntegration() 
     round = get_round(lv_atual,1)
 
     round_atual = 1
@@ -1230,6 +1294,11 @@ while True:
         if event.type == pygame.QUIT:
             pygame.quit()
             sys.exit()
+                # Toggle du coach (affichage des hints) avec la touche H
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_h:
+                coach.toggle_hints()
+
 
         # Pressed down button system
         if True:
@@ -1304,8 +1373,11 @@ while True:
 
     # Gaming State
         # Gaming State
+   
     if active_screen == "gaming":
-        # Générer le niveau procédural UNE SEULE FOIS
+        game_tick += 1
+       
+        
         if not procedural_level_built:
             spec = gen_random_level()
             build_level_pygame(
@@ -1367,6 +1439,13 @@ while True:
                 eid = f"t{idx}"
                 move = moves.get(eid, "stay")
                 apply_ai_move_to_troll(troll, move)
+
+                # ======================
+        #   COACH (Personne B)
+        # ======================
+        if players:
+            gs = build_game_state_from_pygame()
+            coach.update(gs)
 
         # Update sprites
         fruits.update()
@@ -1487,6 +1566,16 @@ while True:
                     x = 110 + index * 25
                     y = 0 + 20
                     screen.blit(scores[int(digit)], scores[int(digit)].get_rect(topleft=(x, y)))
+
+        # Coach HUD : afficher le dernier hint (si disponible)
+        hint_text = coach.get_hint()
+        if hint_text:
+            font = pygame.font.SysFont("Arial", 18)
+            text_surface = font.render(hint_text, True, (255, 255, 0))  # texte jaune
+            bg_rect = text_surface.get_rect()
+            bg_rect.topleft = (60, 80)  # position de l'overlay
+            pygame.draw.rect(screen, (0, 0, 0), bg_rect.inflate(10, 6))  # fond noir
+            screen.blit(text_surface, bg_rect.topleft)
 
         # MiniMenu HUD
         if True:
