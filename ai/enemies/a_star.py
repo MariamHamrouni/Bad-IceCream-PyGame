@@ -5,6 +5,7 @@ import heapq
 from typing import List, Tuple, Dict, Set, Optional
 from dataclasses import dataclass
 import math
+from ai.utils.geometry import manhattan_distance, chebyshev_distance
 
 @dataclass
 class Node:
@@ -147,12 +148,18 @@ class AStarPathfinder:
         
         return neighbors
     
-    def _heuristic(self, a: Tuple[int, int], b: Tuple[int, int]) -> float:
-        """Heuristique de distance diagonale (admissible pour mouvements en 8 directions)"""
-        dx = abs(a[0] - b[0])
-        dy = abs(a[1] - b[1])
-        # Distance de Chebyshev pour mouvements en 8 directions
-        return max(dx, dy)
+    def heuristic(a: Tuple[int, int], b: Tuple[int, int], method: str = "manhattan") -> float:
+        """
+        Heuristique pour A* avec choix de métrique
+        """
+        if method == "manhattan":
+            return manhattan_distance(a, b)
+        elif method == "chebyshev":
+            return chebyshev_distance(a, b)
+        else:  # euclidean par défaut
+            dx = a[0] - b[0]
+            dy = a[1] - b[1]
+            return math.sqrt(dx * dx + dy * dy)
     
     def _reconstruct_path(self, node: Node) -> List[Tuple[int, int]]:
         """Reconstruit le chemin depuis le nœud final"""
@@ -183,7 +190,21 @@ class AStarPathfinder:
 
 # Fonction utilitaire pour l'API
 def find_path(start: Tuple[int, int], goal: Tuple[int, int], 
-              grid_blocked: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
-    """API simplifiée pour trouver un chemin"""
-    pathfinder = AStarPathfinder(grid_width=20, grid_height=15, cell_size=40)
-    return pathfinder.find_path(start, goal, grid_blocked)
+              grid_blocked: List[List[bool]], 
+              allow_diagonal: bool = True) -> List[Tuple[int, int]]:
+    """
+    Trouve un chemin avec A*
+    
+    Args:
+        start: Position de départ (grid coordinates)
+        goal: Position d'arrivée (grid coordinates)
+        grid_blocked: Grille 2D indiquant les cellules bloquées
+        allow_diagonal: Permettre les déplacements en diagonale
+        
+    Returns:
+        Liste de positions (grid coordinates)
+    """
+    # Utiliser Chebyshev pour diagonales, Manhattan sinon
+    heuristic_method = "chebyshev" if allow_diagonal else "manhattan"
+    
+    # Le reste du code A* reste le même...

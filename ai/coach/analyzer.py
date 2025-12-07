@@ -1,10 +1,14 @@
-# ai/coach/analyzer.py
+"""
+Analyseur de performance pour le coach IA - Version adaptée
+"""
 import json
 import time
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Set
 from dataclasses import dataclass
 from pathlib import Path
+from enum import Enum
 
+from ai.utils.geometry import distance_between, point_in_rect, is_point_visible
 from ai.utils.game_api import GameState, GameAPI
 
 @dataclass
@@ -20,6 +24,17 @@ class PerformanceMetrics:
     session_start_time: float = 0.0
     last_death_time: float = 0.0
     fruits_collected_this_session: int = 0
+    
+    def __post_init__(self):
+        """Initialise les listes si None"""
+        if self.fruit_order is None:
+            self.fruit_order = []
+        if self.time_between_deaths is None:
+            self.time_between_deaths = []
+        if self.player_routes is None:
+            self.player_routes = []
+        if self.risk_zones is None:
+            self.risk_zones = {}
 
 class PerformanceAnalyzer:
     """
@@ -33,14 +48,17 @@ class PerformanceAnalyzer:
         self.current_session_start = time.time()
         self.tick_count = 0
         
-        # Réinitialiser les listes
-        self.metrics.fruit_order = []
-        self.metrics.time_between_deaths = []
-        self.metrics.player_routes = []
-        self.metrics.risk_zones = {}
-        
         # Route actuelle du joueur
         self.current_route: List[Tuple[int, int]] = []
+        
+        # Pour suivre les fruits collectés
+        self.collected_fruits_this_session: Set[Tuple[int, int]] = set()
+        
+        # Pour suivre l'usage des blocs de glace
+        self.previous_iceblocks: Set[Tuple[int, int]] = set()
+        
+        # Pour suivre les fruits déjà collectés dans l'état précédent
+        self.previous_fruits_collected: Set[Tuple[int, int]] = set()
     
     def analyze_snapshot(self, game_state: GameState) -> Dict:
         """
@@ -53,12 +71,15 @@ class PerformanceAnalyzer:
             Dict: Métriques calculées
         """
         self.tick_count += 1
-        self.last_game_state = game_state  #Stocker le dernier état pour l'export
+        self.last_game_state = game_state  # Stocker le dernier état pour l'export
+        
         if self.tick_count == 1:
             self.current_session_start = game_state.timer
+        
         # Détection des événements
         self._detect_death(game_state)
         self._detect_fruit_collection(game_state)
+        self._detect_ice_block_usage(game_state)
         self._track_player_movement(game_state)
         self._analyze_risk_zones(game_state)
         
@@ -84,6 +105,7 @@ class PerformanceAnalyzer:
             
             # Réinitialiser le compteur de fruits pour la nouvelle session
             self.metrics.fruits_collected_this_session = 0
+            self.collected_fruits_this_session.clear()
             self.current_session_start = current_time
     
     def _detect_fruit_collection(self, game_state: GameState):
@@ -97,23 +119,39 @@ class PerformanceAnalyzer:
         
         # Fruits collectés (disparus entre les deux états)
         collected_fruits = previous_fruits - current_fruits
-        print(f"🔍 Debug: {len(collected_fruits)} fruits collectés")
+        
         for fruit_pos in collected_fruits:
-            # Pour l'instant on utilise une représentation simple du fruit
-            # Plus tard, on pourrait avoir des types de fruits différents
+            # Récupérer le type de fruit
             fruit_type = self._get_fruit_type(fruit_pos, game_state)
-            self.metrics.fruit_order.append(fruit_type)
-            self.metrics.fruits_collected_this_session += 1
+            if fruit_type not in self.metrics.fruit_order:
+                self.metrics.fruit_order.append(fruit_type)
+                self.metrics.fruits_collected_this_session += 1
+                self.collected_fruits_this_session.add(fruit_pos)
+                
+                print(f"🍎 Fruit collecté: {fruit_type} à {fruit_pos}")
     
     def _get_fruit_type(self, fruit_pos: Tuple[int, int], game_state: GameState) -> str:
-        """
-        Détermine le type de fruit basé sur la position
-        (À adapter selon la logique réelle de votre jeu)
-        """
-        # Exemple simple - dans la réalité, vous auriez cette information dans game_state
+        """Détermine le type de fruit basé sur la position"""
+        # Vérifier dans fruit_types
+        if hasattr(game_state, 'fruit_types') and fruit_pos in game_state.fruit_types:
+            return game_state.fruit_types[fruit_pos]
+        
+        # Fallback: déterminer par position
         fruit_types = ["apple", "banana", "grape", "orange", "strawberry"]
         hash_val = hash(fruit_pos) % len(fruit_types)
         return fruit_types[hash_val]
+    
+    def _detect_ice_block_usage(self, game_state: GameState):
+        """Détecte la création de nouveaux blocs de glace"""
+        current_iceblocks = set(game_state.iceblocks_pos)
+        
+        if self.previous_iceblocks:
+            new_blocks = current_iceblocks - self.previous_iceblocks
+            if new_blocks:
+                self.metrics.ice_block_usage += len(new_blocks)
+                print(f"🧊 {len(new_blocks)} nouveau(x) bloc(s) de glace créé(s)")
+        
+        self.previous_iceblocks = current_iceblocks
     
     def _track_player_movement(self, game_state: GameState):
         """Track la trajectoire du joueur"""
@@ -124,7 +162,7 @@ class PerformanceAnalyzer:
         else:
             last_pos = self.current_route[-1]
             # N'ajouter que si le joueur a bougé significativement
-            if self._distance(last_pos, current_pos) > 20:  # Seuil de mouvement
+            if distance_between(last_pos, current_pos) > 20:  # Seuil de mouvement
                 self.current_route.append(current_pos)
         
         # Si la route devient trop longue, enregistrer et recommencer
@@ -137,7 +175,7 @@ class PerformanceAnalyzer:
         player_pos = game_state.player_pos
         
         for troll_pos in game_state.trolls_pos:
-            distance = self._distance(player_pos, troll_pos)
+            distance = distance_between(player_pos, troll_pos)
             if distance < 100:  # Zone de risque si ennemi à moins de 100 pixels
                 zone_key = self._quantize_position(player_pos)
                 self.metrics.risk_zones[zone_key] = self.metrics.risk_zones.get(zone_key, 0) + 1
@@ -149,16 +187,12 @@ class PerformanceAnalyzer:
             session_duration = game_state.timer - self.current_session_start
             self.metrics.average_fruit_time = session_duration / self.metrics.fruits_collected_this_session
     
-    def _distance(self, pos1: Tuple[int, int], pos2: Tuple[int, int]) -> float:
-        """Calcule la distance euclidienne entre deux points"""
-        return ((pos1[0] - pos2[0])**2 + (pos1[1] - pos2[1])**2)**0.5
-    
     def _quantize_position(self, pos: Tuple[int, int]) -> Tuple[int, int]:
         """Quantize une position pour regrouper les zones proches"""
         grid_size = 40  # Même que votre grille de jeu
         return (pos[0] // grid_size * grid_size, pos[1] // grid_size * grid_size)
     
-    def _get_current_metrics(self,game_state:GameState) -> Dict:
+    def _get_current_metrics(self, game_state: GameState) -> Dict:
         """Retourne les métriques actuelles sous forme de dict"""
         session_duration = game_state.timer - self.current_session_start
         return {
@@ -170,31 +204,122 @@ class PerformanceAnalyzer:
             "current_route_length": len(self.current_route),
             "total_routes_recorded": len(self.metrics.player_routes),
             "high_risk_zones": len(self.metrics.risk_zones),
+            "ice_block_usage": self.metrics.ice_block_usage,
             "fruits_collected_this_session": self.metrics.fruits_collected_this_session,
             "session_duration": session_duration,
-            "total_fruits_collected": len(self.metrics.fruit_order)
+            "total_fruits_collected": len(self.metrics.fruit_order),
+            "player_position": game_state.player_pos,
+            "player_has_block": getattr(game_state, 'player_has_block', False),
+            "active_trolls": len(game_state.trolls_pos),
+            "remaining_fruits": len(game_state.fruits_pos),
+            "score": game_state.score
         }
     
-    def export_metrics(self, filename: str = None):
-        """Exporte les métriques en JSON"""
+    def export_metrics(self, filename: str = None, output_dir: str = "data/logs") -> str:
+        """
+        Exporte les métriques en JSON
+        
+        Returns:
+            Chemin du fichier généré
+        """
         if filename is None:
-            filename = f"metrics_tick_{self.tick_count}.json"
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            filename = f"metrics_{timestamp}.json"
+        
+        output_path = Path(output_dir) / filename
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Créer les métriques
         if hasattr(self, 'last_game_state'):
             current_metrics = self._get_current_metrics(self.last_game_state)
         else:
-        # Valeurs par défaut si pas de game_state disponible
-            current_metrics = self._get_current_metrics(GameState((0,0), True, [], [], [], [], 1, 1, 0.0, 0))
-    
+            # Valeurs par défaut
+            current_metrics = self._get_current_metrics(GameState(
+                player_pos=(0, 0), player_alive=True,
+                trolls_pos=[], iceblocks_pos=[], fruits_pos=[],
+                fruits_collected=[], level=1, round=1, timer=0.0, score=0
+            ))
+        
         metrics_data = {
-            "schema_version": GameAPI.SCHEMA_VERSION,
-            "export_time": time.time(),  # ← Ceci est normal, c'est le timestamp réel de l'export
-            "tick_count": self.tick_count,
-            **current_metrics
+            "metadata": {
+                "export_time": time.time(),
+                "tick_count": self.tick_count,
+                "version": "1.0",
+                "analyzer": "PerformanceAnalyzer"
+            },
+            "metrics": current_metrics
         }
-        GameAPI.export_metrics(metrics_data, filename)
-        return metrics_data
+        
+        with open(output_path, 'w', encoding='utf-8') as f:
+            json.dump(metrics_data, f, indent=2, ensure_ascii=False)
+        
+        print(f"📊 Métriques exportées: {output_path}")
+        return str(output_path)
+    
+    def get_performance_score(self) -> float:
+        """Calcule un score de performance global (0-100)"""
+        if self.tick_count == 0:
+            return 50.0
+        
+        score = 100.0
+        
+        # Pénalités pour les morts
+        score -= self.metrics.death_count * 10
+        
+        # Bonus pour l'efficacité de collecte
+        if self.metrics.average_fruit_time > 0 and self.metrics.average_fruit_time < 60:
+            score += 20
+        elif self.metrics.average_fruit_time < 120:
+            score += 10
+        
+        # Bonus pour l'usage des blocs de glace
+        score += min(self.metrics.ice_block_usage * 2, 20)
+        
+        return max(0.0, min(100.0, score))
+    
+    def get_recommendations(self) -> List[Dict]:
+        """Génère des recommandations basées sur les métriques"""
+        recommendations = []
+        
+        if self.metrics.death_count > 0:
+            recommendations.append({
+                "type": "warning",
+                "message": "Vous mourez trop souvent. Essayez d'éviter les ennemis.",
+                "priority": "high"
+            })
+        
+        if self.metrics.ice_block_usage < 2:
+            recommendations.append({
+                "type": "suggestion",
+                "message": "Utilisez les blocs de glace pour bloquer les ennemis!",
+                "priority": "medium"
+            })
+        
+        return recommendations
     
     def reset(self):
         """Réinitialise l'analyseur pour une nouvelle session"""
         self.__init__()
-        
+
+# Démonstration
+if __name__ == "__main__":
+    # Créer un snapshot de test
+    GameAPI.create_test_snapshot()
+    
+    # Charger l'état
+    game_state = GameAPI.load_snapshot("data/snapshots/test_snapshot.json")
+    
+    # Analyser
+    analyzer = PerformanceAnalyzer()
+    metrics = analyzer.analyze_snapshot(game_state)
+    
+    print("📈 Métriques initiales:", json.dumps(metrics, indent=2))
+    
+    # Simuler une collecte de fruit
+    game_state.fruits_pos = game_state.fruits_pos[1:]  # Enlever un fruit
+    metrics = analyzer.analyze_snapshot(game_state)
+    
+    print("\n📈 Après collecte:", json.dumps(metrics, indent=2))
+    
+    # Exporter
+    analyzer.export_metrics()
