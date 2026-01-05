@@ -1,107 +1,106 @@
-# ai/coach/hint_manager.py
+# Emplacement: ai/coach/hint_manager.py
 import time
 from typing import List, Dict
 from dataclasses import dataclass
 
-from .hints import Hint, HintGenerator
+# IMPORT CORRIGÉ ICI
+from .hints import Hint, HintGenerator, HintPriority
 
 @dataclass
 class DisplayedHint:
-    """Conseil actuellement affiché"""
+    """Conseil actuellement affiché à l'écran"""
     hint: Hint
     start_time: float
     expires_at: float
 
 class HintManager:
-    """Gère l'affichage et priorisation des conseils"""
+    """Gère l'affichage, la file d'attente et la priorisation des conseils"""
     
     def __init__(self, max_concurrent_hints: int = 2):
         self.hint_generator = HintGenerator()
         self.max_concurrent_hints = max_concurrent_hints
+        
         self.current_hints: List[DisplayedHint] = []
         self.hint_history: List[Hint] = []
+        
+        # NOUVEAU : Empêche le spam de conseils du même type
+        self.category_cooldowns = {} 
         self.enabled = True
     
-    def update(self, metrics: Dict, game_state) -> List[Hint]:
-        """Met à jour et retourne conseils à afficher"""
+    def update(self, metrics, game_state) -> List[Hint]:
+        """Met à jour et retourne la liste des conseils à afficher maintenant"""
         if not self.enabled:
             return []
         
         current_time = time.time()
         
-        # Nettoyer conseils expirés
+        # 1. Nettoyer les conseils dont le temps est écoulé
         self._clean_expired_hints(current_time)
         
-        # Générer nouveaux conseils
+        # 2. Demander au générateur de créer de nouveaux conseils potentiels
         new_hints = self.hint_generator.generate_hints(metrics, game_state)
         
-        # Sélectionner conseils à afficher
+        # 3. Filtrer et sélectionner les meilleurs conseils
         hints_to_display = self._select_hints_to_display(new_hints, current_time)
         
-        # Ajouter à l'affichage
+        # 4. Les ajouter à la liste active
         for hint in hints_to_display:
+            # On vérifie qu'on a de la place à l'écran
             if len(self.current_hints) < self.max_concurrent_hints:
-                self.current_hints.append(DisplayedHint(
+                # Créer un wrapper d'affichage
+                display_wrapper = DisplayedHint(
                     hint=hint,
                     start_time=current_time,
                     expires_at=current_time + hint.duration
-                ))
+                )
+                self.current_hints.append(display_wrapper)
+                
+                # Mettre à jour les métriques internes du conseil
                 hint.mark_displayed(current_time)
                 self.hint_history.append(hint)
         
+        # Retourner seulement les objets Hint pour l'affichage
         return [dh.hint for dh in self.current_hints]
-    
-    def get_current_hints(self) -> List[Hint]:
-        """Retourne conseils actuellement affichés"""
-        return [dh.hint for dh in self.current_hints]
-    
-    def clear_hints(self):
-        """Efface tous les conseils"""
-        self.current_hints.clear()
-    
-    def disable(self):
-        """Désactive le système"""
-        self.enabled = False
-        self.clear_hints()
-    
-    def enable(self):
-        """Active le système"""
-        self.enabled = True
     
     def _clean_expired_hints(self, current_time: float):
-        """Supprime conseils expirés"""
+        """Supprime de la liste les conseils expirés"""
         self.current_hints = [
             dh for dh in self.current_hints 
             if current_time < dh.expires_at
         ]
     
-    def _select_hints_to_display(self, new_hints: List[Hint], current_time: float) -> List[Hint]:
-        """Sélectionne conseils selon priorité et limitations"""
-        available = [h for h in new_hints if h.is_ready(current_time)]
+    def _select_hints_to_display(self, new_hints, current_time):
+        """Logique de filtrage anti-spam"""
+        selected = []
         
-        if not available:
-            return []
-        
-        # Trier par priorité
-        available.sort(key=lambda h: h.priority.value, reverse=True)
-        
-        # Prendre les plus prioritaires
-        selected = available[:self.max_concurrent_hints]
-        
-        # Éviter doublons avec ceux déjà affichés
-        current_messages = {dh.hint.message for dh in self.current_hints}
-        selected = [h for h in selected if h.message not in current_messages]
-        
+        # Trier par priorité (CRITICAL en premier)
+        # HintPriority: LOW=1 ... CRITICAL=4
+        new_hints.sort(key=lambda h: h.priority.value, reverse=True)
+
+        for hint in new_hints:
+            # Vérifier si le conseil individuel est prêt
+            if not hint.is_ready(current_time):
+                continue
+
+            # Vérifier si on a déjà un conseil affiché identique
+            if any(dh.hint.message == hint.message for dh in self.current_hints):
+                continue
+
+            # --- LOGIQUE ANTI-SPAM ---
+            # Vérifier le cooldown de la CATÉGORIE
+            last_cat_time = self.category_cooldowns.get(hint.category, 0)
+            
+            # Si le dernier conseil de cette catégorie était il y a moins de 5 sec
+            # ET que ce n'est pas une urgence critique -> On ignore
+            if (current_time - last_cat_time < 5.0) and (hint.priority != HintPriority.CRITICAL):
+                continue
+                
+            # Si on arrive ici, le conseil est validé
+            selected.append(hint)
+            self.category_cooldowns[hint.category] = current_time
+            
+            # Si on a rempli notre quota de nouveaux conseils, on arrête
+            if len(selected) >= self.max_concurrent_hints:
+                break
+                
         return selected
-    
-    def get_stats(self) -> Dict:
-        """Retourne statistiques d'utilisation"""
-        return {
-            "total_hints_generated": len(self.hint_history),
-            "currently_displayed": len(self.current_hints),
-            "enabled": self.enabled,
-            "recent_hints": [
-                {"message": h.message, "priority": h.priority.name, "category": h.category}
-                for h in self.hint_history[-3:]
-            ]
-        }
